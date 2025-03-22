@@ -2,63 +2,117 @@ import numpy as np
 from collections import Counter
 
 class NGramExtractor:
-    
-    def __init__(self, dimension=1, min_freq=5, max_features=10000):
+    def __init__(self, dimension=1, min_freq=1, max_features=None, binary=False, use_cumulative=False):
         """
-        Args:
-            dimension: 最大的gram数，例如dimension=2表示同时使用1-gram和2-gram
-            min_freq: 词频阈值，只保留出现次数大于等于此值的n-gram
-            max_features: 最大特征数量，如果n-gram总数超过此值，只保留最高频的max_features个
+        用于从文本中提取n-gram特征的类
+        
+        参数:
+            dimension: int, n-gram的n值，默认为1
+            min_freq: int, n-gram的最小频率阈值，低于此频率的n-gram将被过滤掉
+            max_features: int, 要保留的最大特征数量，如果为None则保留全部
+            binary: bool, 如果为True，特征值将为二进制（0或1），否则为计数值
+            use_cumulative: bool, 如果为True，特征将包括1-gram到n-gram
         """
-        self.dimension = dimension  # 最大gram数
-        self.min_freq = min_freq  # 最小词频
-        self.max_features = max_features  # 最大特征数量
-        self.ngram_vocab = {}  # n-gram词汇表（键值对）
+        self.dimension = dimension
+        self.min_freq = min_freq
+        self.max_features = max_features
+        self.binary = binary
+        self.use_cumulative = use_cumulative
+        self.vocab = {}  # 词汇表，将n-gram映射到索引
         self.vocab_size = 0  # 词汇表大小
-    
+        
+    def _extract_ngrams(self, text, n):
+        """
+        从文本中提取n-gram
+        
+        参数:
+            text: str, 输入文本
+            n: int, n-gram的n值
+            
+        返回:
+            n-gram列表
+        """
+        words = text.split()
+        return [' '.join(words[i:i+n]) for i in range(len(words)-n+1)]
+        
     def fit(self, texts):
-        """创建n-gram词汇表，只保留频率大于min_freq的词"""
-        # 统计所有n-gram的出现次数
-        ngram_counter = Counter()
+        """
+        构建词汇表
         
-        # 提取文本中的所有n-gram并统计频率
-        for n in range(1, self.dimension + 1):
-            for text in texts:
-                words = text.lower().split()
-                for i in range(len(words) - n + 1):
-                    ngram = ' '.join(words[i:i+n])
-                    ngram_counter[ngram] += 1
+        参数:
+            texts: list, 文本列表
+            
+        返回:
+            self
+        """
+        # 计数器，用于统计n-gram频率
+        ngram_counts = Counter()
         
-        # 只保留出现频率大于等于min_freq的n-gram
-        filtered_ngrams = [ngram for ngram, count in ngram_counter.items() 
-                          if count >= self.min_freq]
+        # 如果use_cumulative为True，则提取1-gram到n-gram
+        dimensions = range(1, self.dimension + 1) if self.use_cumulative else [self.dimension]
         
-        # 如果特征数量超过max_features，只保留最高频的max_features个
-        if len(filtered_ngrams) > self.max_features:
-            most_common = ngram_counter.most_common(self.max_features)
-            filtered_ngrams = [ngram for ngram, _ in most_common]
+        # 统计n-gram频率
+        for text in texts:
+            for n in dimensions:
+                ngrams = self._extract_ngrams(text, n)
+                ngram_counts.update(ngrams)
         
-        # 创建词汇表映射
-        self.ngram_vocab = {ngram: idx for idx, ngram in enumerate(filtered_ngrams)}
-        self.vocab_size = len(self.ngram_vocab)
+        # 过滤低频n-gram
+        filtered_ngrams = [(ngram, count) for ngram, count in ngram_counts.items() if count >= self.min_freq]
         
-        print(f"原始n-gram数量: {len(ngram_counter)}, 过滤后n-gram数量: {self.vocab_size}")
+        # 按频率降序排序
+        filtered_ngrams.sort(key=lambda x: x[1], reverse=True)
+        
+        # 如果指定了max_features，则只保留top-K个n-gram
+        if self.max_features is not None and len(filtered_ngrams) > self.max_features:
+            filtered_ngrams = filtered_ngrams[:self.max_features]
+        
+        # 构建词汇表
+        self.vocab = {ngram: idx for idx, (ngram, _) in enumerate(filtered_ngrams)}
+        self.vocab_size = len(self.vocab)
+        
         return self
-    
+        
     def transform(self, texts):
-        """将文本转换为n-gram特征向量"""
+        """
+        将文本转换为特征向量
+        
+        参数:
+            texts: list, 文本列表
+            
+        返回:
+            特征矩阵，每行对应一个文本，每列对应一个n-gram特征
+        """
+        # 创建一个全零矩阵
         features = np.zeros((len(texts), self.vocab_size), dtype=np.float32)
-        for i, text in enumerate(texts):
-            words = text.lower().split()
-            for n in range(1, self.dimension + 1):
-                for j in range(len(words) - n + 1):
-                    ngram = ' '.join(words[j:j+n])
-                    if ngram in self.ngram_vocab:
-                        features[i, self.ngram_vocab[ngram]] = 1
+        
+        dimensions = range(1, self.dimension + 1) if self.use_cumulative else [self.dimension]
+        
+        for text_idx, text in enumerate(texts):
+            # 提取n-gram并计数
+            text_ngram_counts = Counter()
+            for n in dimensions:
+                ngrams = self._extract_ngrams(text, n)
+                text_ngram_counts.update(ngrams)
+            
+            # 更新特征矩阵
+            for ngram, count in text_ngram_counts.items():
+                if ngram in self.vocab:
+                    features[text_idx, self.vocab[ngram]] = 1 if self.binary else count
+        
         return features
-    
+        
     def fit_transform(self, texts):
-        """先构建词汇表，再转换为特征向量"""
-        return self.fit(texts).transform(texts)
+        """
+        构建词汇表并将文本转换为特征向量
+        
+        参数:
+            texts: list, 文本列表
+            
+        返回:
+            特征矩阵，每行对应一个文本，每列对应一个n-gram特征
+        """
+        self.fit(texts)
+        return self.transform(texts)
 
 
