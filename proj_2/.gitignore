@@ -1,0 +1,19 @@
+# 忽略数据目录
+data/
+/data/
+
+# 忽略结果目录
+results/
+/results/
+
+# 忽略模型检查点
+checkpoints/
+/checkpoints/
+
+# 忽略wandb相关文件
+wandb/
+/wandb/
+*.wandb
+
+# 忽略README文件
+README.md
